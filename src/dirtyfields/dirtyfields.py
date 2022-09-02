@@ -73,6 +73,27 @@ class DirtyFieldsMixin(object):
             return True
         return False
 
+    def _resolve_field_value(self, field):
+        field_value = getattr(self, field.attname)
+
+        if isinstance(field_value, File):
+            # Uses the name for files due to a perfomance regression caused by Django 3.1.
+            # For more info see: https://github.com/romgar/django-dirtyfields/issues/165
+            field_value = field_value.name
+
+        try:
+            # Store the converted value for fields with conversion
+            field_value = field.to_python(field_value)
+        except ValidationError:
+            # The current value is not valid so we cannot convert it
+            pass
+
+        if isinstance(field_value, memoryview):
+            # psycopg2 returns uncopyable type buffer for bytea
+            field_value = bytes(field_value)
+
+        return field_value
+
     def _as_dict(self, check_relationship, include_primary_key=True):
         """
         Capture the model fields' state as a dictionary.
@@ -85,24 +106,7 @@ class DirtyFieldsMixin(object):
         for field in self._meta.concrete_fields:
             if self._skip_field(field, check_relationship, include_primary_key):
                 continue
-
-            field_value = getattr(self, field.attname)
-
-            if isinstance(field_value, File):
-                # Uses the name for files due to a perfomance regression caused by Django 3.1.
-                # For more info see: https://github.com/romgar/django-dirtyfields/issues/165
-                field_value = field_value.name
-
-            try:
-                # Store the converted value for fields with conversion
-                field_value = field.to_python(field_value)
-            except ValidationError:
-                # The current value is not valid so we cannot convert it
-                pass
-
-            if isinstance(field_value, memoryview):
-                # psycopg2 returns uncopyable type buffer for bytea
-                field_value = bytes(field_value)
+            field_value = self._resolve_field_value(field)
 
             # Explanation of copy usage here :
             # https://github.com/romgar/django-dirtyfields/commit/efd0286db8b874b5d6bd06c9e903b1a0c9cc6b00
